@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Укради Яйцо</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100vw; height: 100vh;
+  overflow: hidden;
+  background: #191923;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#cv { display: block; width: 100%; height: 100%; }
+#pets-btn {
+  position: fixed; top: 10px; left: 10px;
+  padding: 8px 14px; border-radius: 8px;
+  background: rgba(60,60,80,0.9); color: white;
+  border: 2px solid rgba(200,200,200,0.5);
+  font: bold 14px Arial, sans-serif;
+  z-index: 100; cursor: pointer;
+}
+#pets-panel {
+  display: none;
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%,-50%);
+  width: 90%; max-width: 420px; max-height: 75vh;
+  overflow-y: auto;
+  background: #1e1e2e; color: white;
+  border: 2px solid #50507a; border-radius: 12px;
+  padding: 15px;
+  font-family: Arial, sans-serif;
+  z-index: 200;
+}
+#pets-panel h2 { font-size: 18px; color: #ffc832; margin-bottom: 10px; }
+.pet-row {
+  display: flex; justify-content: space-between;
+  padding: 8px 12px; background: #28283c;
+  border-radius: 6px; margin-bottom: 5px;
+  font-size: 14px;
+}
+#pets-close, #pets-reset {
+  display: block; width: 100%; margin-top: 8px;
+  padding: 10px; border: none; border-radius: 8px;
+  color: white;
+  font: bold 14px Arial, sans-serif;
+  cursor: pointer;
+}
+#pets-close { background: #50507a; }
+#pets-reset { background: #a02020; }
+#joy {
+  display: none;
+  position: fixed; bottom: 20px; left: 20px;
+  width: 140px; height: 140px;
+  border-radius: 50%;
+  background: rgba(60,60,80,0.5);
+  border: 2px solid rgba(200,200,200,0.5);
+  z-index: 50;
+  touch-action: none;
+}
+#joy-knob {
+  position: absolute; left: 50%; top: 50%;
+  width: 60px; height: 60px;
+  margin: -30px 0 0 -30px;
+  border-radius: 50%;
+  background: rgba(200,200,220,0.7);
+  pointer-events: none;
+}
+#btn-e {
+  display: none;
+  position: fixed; bottom: 50px; right: 30px;
+  width: 90px; height: 90px;
+  border-radius: 50%;
+  background: rgba(80,140,220,0.9);
+  border: 3px solid rgba(150,200,255,0.8);
+  color: white;
+  font: bold 28px Arial, sans-serif;
+  z-index: 50;
+  touch-action: none;
+  cursor: pointer;
+  align-items: center; justify-content: center;
+}
+#err {
+  display: none;
+  position: fixed; top: 0; left: 0; right: 0;
+  background: #b00020; color: white;
+  padding: 20px; font: 14px monospace;
+  z-index: 999; white-space: pre-wrap;
+}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<button id="pets-btn">🐾 ПИТОМЦЫ</button>
+<div id="pets-panel">
+  <h2>Мои питомцы</h2>
+  <div id="pets-list"></div>
+  <button id="pets-close">Закрыть</button>
+  <button id="pets-reset">🔄 Сбросить прогресс</button>
+</div>
+<div id="joy"><div id="joy-knob"></div></div>
+<div id="btn-e">E</div>
+<div id="err"></div>
+
+<script>
+window.onerror = function(m, s, l, c, e) {
+  var d = document.getElementById('err');
+  d.style.display = 'block';
+  d.textContent = 'ОШИБКА: ' + m + '\nСтрока: ' + l + '\n' + (e && e.stack ? e.stack : '');
+  return false;
+};
+
+(function(){
+  var W = 1280, H = 720;
+  var MAP_W = 1750; // ширина всей карты (камера скроллится)
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  cv.width = W;
+  cv.height = H;
+
+  var BASE_ZONE = [30, 350];
+  var ZONE1 = [450, 750];
+  var ZONE2 = [850, 1150];
+  var ZONE3 = [1250, 1650];   // KFC
+
+  var REQ_SPEED = {1: 15, 2: 50, 3: 250, 4: 350};
+  var TM_MAX = {1: 15, 2: 25, 3: 35, 4: 45, 5: 50, 6: 100, 7: 250, 8: 500};
+  var TM_COST = {1: 50, 2: 200, 3: 600, 4: 2000, 5: 5000, 6: 15000, 7: 50000};
+  var TRAIN_TICK = 15;
+  var HATCH = {1: 600, 2: 1500, 3: 900, 4: 1200};
+  var EGG_COLOR = {1: '#d2b48c', 2: '#c8c8dc', 3: '#e8a860', 4: '#e87830'};
+
+  var PETS = {
+    1: [['Щенок мопса', 1], ['Боевой мопс', 3], ['Королевский мопс', 8]],
+    2: [['Зайчонок', 4], ['Быстрый заяц', 12], ['Король зайцев', 30]],
+    3: [['Мини-бургер', 60], ['Бигмак', 150], ['Королевский бигмак', 400]],
+    4: [['Мини-ведерко', 80], ['Ведерко КФС', 200], ['Золотое ведерко', 500]]
+  };
+
+  function rollPet() {
+    var r = Math.random();
+    return r < 0.6 ? 0 : (r < 0.9 ? 1 : 2);
+  }
+
+  function eggToBossType(eggType) {
+    if (eggType === 3 || eggType === 4) return 3;
+    return eggType;
+  }
+
+  var player = { x: 190, y: H/2, speed: 1, carrying: null, trainTimer: 0 };
+  var eggs = [
+    { x: 600,  y: H/2 - 50, type: 1, loc: 'nest', timer: 0, pet: rollPet() },
+    { x: 1000, y: H/2 - 50, type: 2, loc: 'nest', timer: 0, pet: rollPet() },
+    { x: 1350, y: H/2 - 60, type: 3, loc: 'nest', timer: 0, pet: rollPet() },
+    { x: 1560, y: H/2 - 60, type: 4, loc: 'nest', timer: 0, pet: rollPet() }
+  ];
+  var bosses = [
+    { x: 600,  y: H/2 + 120, hx: 600,  hy: H/2 + 120, type: 1, chasing: false, speed: 5 },
+    { x: 1000, y: H/2 + 120, hx: 1000, hy: H/2 + 120, type: 2, chasing: false, speed: 7 },
+    { x: 1450, y: H/2 + 120, hx: 1450, hy: H/2 + 120, type: 3, chasing: false, speed: 20 }
+  ];
+  var pets = [];
+  var tm = { x: 190, y: H/2 + 200, level: 1, upgrading: false, upTimer: 0 };
+  var money = 0;
+  var incomeTimer = 0;
+  var msg = '';
+  var msgTimer = 0;
+  var keys = {};
+  var cameraX = 0;
+
+  var PEN_X = 40, PEN_Y = 100, PEN_W = 300, PEN_H = 210;
+  var PEN_SLOTS = [
+    [PEN_X + 75,  PEN_Y + 70],
+    [PEN_X + 225, PEN_Y + 70],
+    [PEN_X + 75,  PEN_Y + 165],
+    [PEN_X + 225, PEN_Y + 165]
+  ];
+
+  var joyActive = false, joyDX = 0, joyDY = 0;
+  var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || ('ontouchstart' in window);
+
+  // ===== СОХРАНЕНИЕ =====
+  var SAVE_KEY = 'stealEggSave_v1';
+
+  function saveGame() {
+    try {
+      var data = {
+        money: money,
+        pets: pets,
+        tmLevel: tm.level,
+        playerSpeed: player.speed,
+        eggs: eggs.map(function(e) {
+          return { type: e.type, loc: e.loc, timer: e.timer, pet: e.pet };
+        })
+      };
+      localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    } catch (err) {}
+  }
+
+  function loadGame() {
+    try {
+      var s = localStorage.getItem(SAVE_KEY);
+      if (!s) return false;
+      var d = JSON.parse(s);
+      money = d.money || 0;
+      pets = d.pets || [];
+      tm.level = d.tmLevel || 1;
+      player.speed = d.playerSpeed || 1;
+      if (d.eggs) {
+        for (var i = 0; i < eggs.length && i < d.eggs.length; i++) {
+          var se = d.eggs[i];
+          eggs[i].loc = (se.loc === 'carried') ? 'nest' : se.loc;
+          eggs[i].timer = se.timer || 0;
+          eggs[i].pet = se.pet || 0;
+        }
+      }
+      return true;
+    } catch (err) { return false; }
+  }
+
+  function resetSave() {
+    try { localStorage.removeItem(SAVE_KEY); } catch (err) {}
+    location.reload();
+  }
+
+  var saveTimer = 0;
+  function autoSaveTick() {
+    saveTimer++;
+    if (saveTimer >= 180) { // каждые 3 сек
+      saveTimer = 0;
+      saveGame();
+    }
+  }
+
+  // ===== УТИЛИТЫ =====
+  function dist(x1, y1, x2, y2) { return Math.hypot(x2-x1, y2-y1); }
+  function totalIncome() { var s = 0; for (var i = 0; i < pets.length; i++) s += pets[i].income; return s; }
+  function inBase() { return player.x >= BASE_ZONE[0] && player.x <= BASE_ZONE[1]; }
+  function onTM() { return dist(player.x, player.y, tm.x, tm.y) < 100; }
+  function moveSpeed() { return 3 + player.speed * 0.2; }
+  function showMsg(t, sec) { msg = t; msgTimer = (sec || 2) * 60; }
+
+  function resetWorld() {
+    player.x = 190; player.y = H/2; player.carrying = null;
+    for (var i = 0; i < eggs.length; i++) {
+      var e = eggs[i];
+      e.loc = 'nest'; e.timer = 0; e.pet = rollPet();
+      if (e.type === 1) { e.x = 600; e.y = H/2 - 50; }
+      else if (e.type === 2) { e.x = 1000; e.y = H/2 - 50; }
+      else if (e.type === 3) { e.x = 1350; e.y = H/2 - 60; }
+      else { e.x = 1560; e.y = H/2 - 60; }
+    }
+    for (var j = 0; j < bosses.length; j++) {
+      bosses[j].chasing = false;
+      bosses[j].x = bosses[j].hx;
+      bosses[j].y = bosses[j].hy;
+    }
+  }
+
+  function interact() {
+    if (player.carrying === null) {
+      for (var i = 0; i < eggs.length; i++) {
+        var e = eggs[i];
+        if (e.loc === 'nest' && dist(player.x, player.y, e.x, e.y) < 60) {
+          var need = REQ_SPEED[e.type];
+          if (player.speed < need) {
+            showMsg('Нужна скорость ' + need + '! У тебя ' + player.speed.toFixed(1));
+            return;
+          }
+          e.loc = 'carried';
+          player.carrying = e.type;
+          var bt = eggToBossType(e.type);
+          for (var j = 0; j < bosses.length; j++) {
+            if (bosses[j].type === bt) bosses[j].chasing = true;
+          }
+          showMsg('Ты украл яйцо! Беги на базу!');
+          return;
+        }
+      }
+      for (var k = 0; k < eggs.length; k++) {
+        var e2 = eggs[k];
+        if (e2.loc === 'ready') {
+          var sl = PEN_SLOTS[k];
+          if (dist(player.x, player.y, sl[0], sl[1]) < 100) {
+            var p = PETS[e2.type][e2.pet];
+            pets.push({ name: p[0], income: p[1] });
+            showMsg('Питомец: ' + p[0] + '! (+' + p[1] + '/сек)', 2.5);
+            e2.loc = 'nest'; e2.timer = 0; e2.pet = rollPet();
+            if (e2.type === 1) { e2.x = 600; e2.y = H/2 - 50; }
+            else if (e2.type === 2) { e2.x = 1000; e2.y = H/2 - 50; }
+            else if (e2.type === 3) { e2.x = 1350; e2.y = H/2 - 60; }
+            else { e2.x = 1560; e2.y = H/2 - 60; }
+            var btype = eggToBossType(e2.type);
+            for (var m = 0; m < bosses.length; m++) {
+              if (bosses[m].type === btype) bosses[m].chasing = false;
+            }
+            saveGame();
+            return;
+          }
+        }
+      }
+    }
+    if (onTM() && !tm.upgrading) {
+      if (tm.level >= 8) { showMsg('Максимальный уровень!'); return; }
+      var cost = TM_COST[tm.level];
+      if (money < cost) { showMsg('Нужно ' + cost + ' монет! У тебя ' + Math.floor(money)); return; }
+      money -= cost;
+      tm.upgrading = true;
+      tm.upTimer = 90;
+      showMsg('Улучшаем дорожку...');
+      return;
+    }
+  }
+
+  function update() {
+    var dx = 0, dy = 0;
+    if (keys['a'] || keys['arrowleft']) dx -= 1;
+    if (keys['d'] || keys['arrowright']) dx += 1;
+    if (keys['w'] || keys['arrowup']) dy -= 1;
+    if (keys['s'] || keys['arrowdown']) dy += 1;
+    if (joyActive) { dx += joyDX; dy += joyDY; }
+    if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
+      var l = Math.hypot(dx, dy) || 1;
+      var sp = moveSpeed();
+      player.x += dx / l * sp;
+      player.y += dy / l * sp;
+    }
+    if (player.x < 20) player.x = 20;
+    if (player.x > MAP_W - 20) player.x = MAP_W - 20;
+    if (player.y < 20) player.y = 20;
+    if (player.y > H - 20) player.y = H - 20;
+
+    // Камера
+    var targetCam = player.x - W / 2;
+    var maxCam = MAP_W - W;
+    if (maxCam < 0) maxCam = 0;
+    if (targetCam < 0) targetCam = 0;
+    if (targetCam > maxCam) targetCam = maxCam;
+    cameraX += (targetCam - cameraX) * 0.12; // плавно
+
+    // Тренировка
+    if (onTM() && !tm.upgrading) {
+      var mx = TM_MAX[tm.level];
+      if (player.speed < mx) {
+        player.trainTimer++;
+        if (player.trainTimer >= TRAIN_TICK) {
+          player.trainTimer = 0;
+          player.speed = Math.min(mx, player.speed + 0.5);
+        }
+      } else { player.trainTimer = 0; }
+    } else { player.trainTimer = 0; }
+
+    // Боссы
+    for (var i = 0; i < bosses.length; i++) {
+      var b = bosses[i];
+      if (b.chasing && inBase()) b.chasing = false;
+      if (b.chasing) {
+        var ddx = player.x - b.x, ddy = player.y - b.y;
+        var d = Math.hypot(ddx, ddy);
+        if (d > 0) { b.x += ddx / d * b.speed; b.y += ddy / d * b.speed; }
+        if (d < 40 && !inBase()) {
+          var bt = eggToBossType(player.carrying);
+          if (player.carrying !== null && bt === b.type) {
+            showMsg('Тебя поймали! Яйцо потеряно!');
+            resetWorld();
+            return;
+          }
+        }
+      } else {
+        var hx = b.hx - b.x, hy = b.hy - b.y;
+        var hd = Math.hypot(hx, hy);
+        if (hd > 3) { b.x += hx / hd * 2; b.y += hy / hd * 2; }
+      }
+    }
+
+    // Сдача яйца на базе
+    if (player.carrying !== null && inBase()) {
+      for (var k = 0; k < eggs.length; k++) {
+        var e = eggs[k];
+        if (e.type === player.carrying && e.loc === 'carried') {
+          e.loc = 'pen';
+          e.timer = HATCH[e.type];
+          var nm = ['','Мопса','Зайца','Бигмака','Крылышек'][e.type];
+          showMsg('Яйцо ' + nm + ' в загоне! Ждать ' + Math.floor(HATCH[e.type]/60) + 'с');
+          player.carrying = null;
+          saveGame();
+          break;
+        }
+      }
+    }
+
+    // Инкубация
+    for (var n = 0; n < eggs.length; n++) {
+      var eg = eggs[n];
+      if (eg.loc === 'pen') {
+        eg.timer--;
+        if (eg.timer <= 0) {
+          eg.loc = 'ready';
+          showMsg('Яйцо готово! Нажми E у загона!');
+        }
+      }
+    }
+
+    // Дорожка
+    if (tm.upgrading) {
+      tm.upTimer--;
+      if (tm.upTimer <= 0) {
+        tm.upgrading = false;
+        tm.level++;
+        showMsg('Дорожка ур.' + tm.level + '! Макс скорость ' + TM_MAX[tm.level], 3);
+        saveGame();
+      }
+    }
+
+    incomeTimer++;
+    if (incomeTimer >= 60) {
+      incomeTimer = 0;
+      money += totalIncome();
+    }
+    if (msgTimer > 0) msgTimer--;
+    autoSaveTick();
+  }
+
+  // ===== РИСОВАНИЕ ЯИЦ =====
+  function drawCrown(cx, cy) {
+    ctx.fillStyle = '#ffc832';
+    ctx.strokeStyle = '#8b6914';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - 13, cy);
+    ctx.lineTo(cx - 9, cy - 12);
+    ctx.lineTo(cx - 4, cy - 3);
+    ctx.lineTo(cx, cy - 16);
+    ctx.lineTo(cx + 4, cy - 3);
+    ctx.lineTo(cx + 9, cy - 12);
+    ctx.lineTo(cx + 13, cy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  function drawBurgerEgg(cx, cy, pet) {
+    // Верхняя булочка
+    ctx.fillStyle = '#e8a860';
+    ctx.strokeStyle = '#a06020';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 24, cy - 4);
+    ctx.quadraticCurveTo(cx, cy - 40, cx + 24, cy - 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // Кунжут
+    ctx.fillStyle = '#f0d090';
+    ctx.beginPath(); ctx.arc(cx - 8, cy - 16, 2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + 6, cy - 20, 2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + 12, cy - 10, 2, 0, Math.PI * 2); ctx.fill();
+    // Салат
+    ctx.fillStyle = '#40b040';
+    ctx.fillRect(cx - 26, cy - 4, 52, 4);
+    // Котлета
+    ctx.fillStyle = '#6a3a20';
+    ctx.fillRect(cx - 24, cy, 48, 7);
+    // Сыр
+    ctx.fillStyle = '#ffd020';
+    ctx.fillRect(cx - 24, cy + 7, 48, 4);
+    // Нижняя булочка
+    ctx.fillStyle = '#e8a860';
+    ctx.strokeStyle = '#a06020';
+    ctx.beginPath();
+    ctx.moveTo(cx - 24, cy + 11);
+    ctx.lineTo(cx - 24, cy + 16);
+    ctx.quadraticCurveTo(cx, cy + 26, cx + 24, cy + 16);
+    ctx.lineTo(cx + 24, cy + 11);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    if (pet === 2) drawCrown(cx, cy - 42);
+    else if (pet === 1) {
+      ctx.strokeStyle = '#ffcc00';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(cx - 22, cy + 1); ctx.lineTo(cx + 22, cy + 1); ctx.stroke();
+    }
+  }
+
+  function drawWingsEgg(cx, cy, pet) {
+    var rx = 22, ry = 30;
+    ctx.fillStyle = '#e87830';
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    // Крылышки внутри
+    ctx.fillStyle = '#f0a860';
+    ctx.beginPath();
+    ctx.moveTo(cx - 12, cy + 5);
+    ctx.quadraticCurveTo(cx - 15, cy - 8, cx - 3, cy - 10);
+    ctx.quadraticCurveTo(cx - 5, cy - 3, cx - 3, cy + 3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx + 12, cy + 5);
+    ctx.quadraticCurveTo(cx + 15, cy - 8, cx + 3, cy - 10);
+    ctx.quadraticCurveTo(cx + 5, cy - 3, cx + 3, cy + 3);
+    ctx.closePath();
+    ctx.fill();
+    // Кост
+    ctx.fillStyle = '#f0e0c0';
+    ctx.fillRect(cx - 2, cy - 15, 4, 15);
+    if (pet === 2) drawCrown(cx, cy - ry - 4);
+    else if (pet === 1) {
+      ctx.strokeStyle = '#ffcc00';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(cx - rx * 0.9, cy); ctx.lineTo(cx + rx * 0.9, cy); ctx.stroke();
+    }
+  }
+
+  function drawEgg(cx, cy, type, pet) {
+    if (type === 3) { drawBurgerEgg(cx, cy, pet); return; }
+    if (type === 4) { drawWingsEgg(cx, cy, pet); return; }
+    // Обычное яйцо
+    var col = EGG_COLOR[type];
+    var rx = 20, ry = 28;
+    ctx.fillStyle = col;
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + 1, rx, ry + 1, 0, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#e6e6e6';
+    ctx.beginPath();
+    ctx.ellipse(cx - rx * 0.35, cy - ry * 0.4, rx * 0.3, ry * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (pet === 1) {
+      ctx.strokeStyle = '#ffcc00';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(cx - rx * 0.9, cy); ctx.lineTo(cx + rx * 0.9, cy); ctx.stroke();
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cx - rx * 0.7, cy - 8); ctx.lineTo(cx + rx * 0.7, cy - 8); ctx.stroke();
+    } else if (pet === 2) {
+      drawCrown(cx, cy - ry - 4);
+    }
+  }
+
+  // ===== БОССЫ =====
+  function drawBoss(b) {
+    var bx = b.x, by = b.y;
+    if (b.type === 1) {
+      // Мопс
+      ctx.fillStyle = '#643c1e';
+      ctx.beginPath(); ctx.ellipse(bx - 20, by - 27, 12, 15, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(bx + 20, by - 27, 12, 15, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#96643c';
+      ctx.beginPath(); ctx.arc(bx, by, 32, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#7a4a28';
+      ctx.beginPath(); ctx.ellipse(bx, by + 12, 14, 10, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'black';
+      ctx.beginPath(); ctx.arc(bx, by + 10, 5, 0, Math.PI * 2); ctx.fill();
+    } else if (b.type === 2) {
+      // Заяц
+      ctx.fillStyle = '#ffaac8';
+      ctx.beginPath(); ctx.ellipse(bx - 15, by - 45, 10, 30, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(bx + 15, by - 45, 10, 30, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(bx, by, 28, 38, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ff88aa';
+      ctx.beginPath(); ctx.ellipse(bx, by + 15, 12, 10, 0, 0, Math.PI * 2); ctx.fill();
+    } else if (b.type === 3) {
+      // БОСС КФС - жирный мужик
+      // Живот
+      ctx.fillStyle = '#c82020';
+      ctx.beginPath(); ctx.ellipse(bx, by + 5, 42, 38, 0, 0, Math.PI * 2); ctx.fill();
+      // Фартук (белый)
+      ctx.fillStyle = 'white';
+      ctx.beginPath();
+      ctx.moveTo(bx - 25, by - 15);
+      ctx.lineTo(bx + 25, by - 15);
+      ctx.lineTo(bx + 20, by + 35);
+      ctx.lineTo(bx - 20, by + 35);
+      ctx.closePath();
+      ctx.fill();
+      // Пуговицы
+      ctx.fillStyle = '#c82020';
+      ctx.beginPath(); ctx.arc(bx, by - 5, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(bx, by + 8, 3, 0, Math.PI * 2); ctx.fill();
+      // Голова
+      ctx.fillStyle = '#f0c898';
+      ctx.beginPath(); ctx.arc(bx, by - 32, 20, 0, Math.PI * 2); ctx.fill();
+      // Колпак
+      ctx.fillStyle = 'white';
+      ctx.beginPath();
+      ctx.ellipse(bx, by - 50, 20, 12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillRect(bx - 20, by - 50, 40, 8);
+      // Глаза
+      ctx.fillStyle = b.chasing ? '#dc3545' : 'black';
+      ctx.beginPath(); ctx.arc(bx - 7, by - 34, 3.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(bx + 7, by - 34, 3.5, 0, Math.PI * 2); ctx.fill();
+      // Усы
+      ctx.fillStyle = '#402010';
+      ctx.fillRect(bx - 12, by - 24, 24, 4);
+      // Бабочка (KFC)
+      ctx.fillStyle = '#c82020';
+      ctx.beginPath();
+      ctx.moveTo(bx - 12, by - 12);
+      ctx.lineTo(bx, by - 6);
+      ctx.lineTo(bx - 12, by);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(bx + 12, by - 12);
+      ctx.lineTo(bx, by - 6);
+      ctx.lineTo(bx + 12, by);
+      ctx.closePath();
+      ctx.fill();
+      // Руки
+      ctx.fillStyle = '#f0c898';
+      ctx.beginPath(); ctx.arc(bx - 40, by + 5, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(bx + 40, by + 5, 10, 0, Math.PI * 2); ctx.fill();
+    }
+    // Глаза (для всех кроме КФС — там уже нарисованы)
+    if (b.type !== 3) {
+      ctx.fillStyle = b.chasing ? '#dc3545' : 'black';
+      ctx.beginPath(); ctx.arc(bx - 9, by - 6, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(bx + 9, by - 6, 5, 0, Math.PI * 2); ctx.fill();
+    }
+    // Подпись
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 11px Arial';
+    ctx.textAlign = 'center';
+    var names = {1: 'МОПС', 2: 'ЗАЯЦ', 3: 'БОСС КФС'};
+    ctx.fillText(names[b.type], bx, by - 72);
+    if (b.chasing) {
+      ctx.fillStyle = '#dc3545';
+      ctx.font = 'bold 16px Arial';
+      ctx.fillText('!!!', bx, by - 90);
+    }
+  }
+
+  // ===== ОСНОВНАЯ ОТРИСОВКА =====
+  function draw() {
+    // Фон (экран)
+    ctx.fillStyle = '#191923';
+    ctx.fillRect(0, 0, W, H);
+
+    // МИР
+    ctx.save();
+    ctx.translate(-cameraX, 0);
+
+    // Зоны
+    ctx.fillStyle = '#325032';
+    ctx.fillRect(BASE_ZONE[0], 0, BASE_ZONE[1] - BASE_ZONE[0], H);
+    ctx.fillStyle = '#5a4b32';
+    ctx.fillRect(ZONE1[0], 0, ZONE1[1] - ZONE1[0], H);
+    ctx.fillStyle = '#5a5a78';
+    ctx.fillRect(ZONE2[0], 0, ZONE2[1] - ZONE2[0], H);
+    // KFC — тёмно-красный
+    ctx.fillStyle = '#7a1e1e';
+    ctx.fillRect(ZONE3[0], 0, ZONE3[1] - ZONE3[0], H);
+    // Полоски KFC
+    ctx.fillStyle = '#5a1010';
+    for (var yy = 0; yy < H; yy += 60) {
+      ctx.fillRect(ZONE3[0], yy, ZONE3[1] - ZONE3[0], 30);
+    }
+
+    // Границы зон
+    ctx.strokeStyle = '#c8c8c8';
+    ctx.lineWidth = 3;
+    var allZones = [ZONE1, ZONE2, ZONE3];
+    for (var zi = 0; zi < allZones.length; zi++) {
+      var z = allZones[zi];
+      ctx.beginPath(); ctx.moveTo(z[0], 0); ctx.lineTo(z[0], H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(z[1], 0); ctx.lineTo(z[1], H); ctx.stroke();
+    }
+
+    // Заголовки зон
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 20px Arial';
+    ctx.fillStyle = 'white';
+    ctx.fillText('БАЗА', BASE_ZONE[0] + 160, 32);
+    ctx.fillStyle = '#ffdc32';
+    ctx.fillText('ЛОГОВО МОПСА', ZONE1[0] + 150, 32);
+    ctx.fillStyle = '#ffaac8';
+    ctx.fillText('ЛОГОВО ЗАЙЦА', ZONE2[0] + 150, 32);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('🍗 KFC 🍗', ZONE3[0] + 200, 32);
+
+    // Загон
+    ctx.fillStyle = '#283c28';
+    ctx.fillRect(PEN_X, PEN_Y, PEN_W, PEN_H);
+    ctx.strokeStyle = '#c8c8c8';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(PEN_X, PEN_Y, PEN_W, PEN_H);
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 13px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText('ЗАГОН', PEN_X + 10, PEN_Y + 22);
+
+    // Яйца в загоне
+    for (var k = 0; k < eggs.length; k++) {
+      var e = eggs[k];
+      if (e.loc === 'pen' || e.loc === 'ready') {
+        var sl = PEN_SLOTS[k];
+        var sx = sl[0], sy = sl[1];
+        if (e.loc === 'pen') {
+          drawEgg(sx, sy, e.type, e.pet);
+          ctx.fillStyle = '#ffdc32';
+          ctx.font = 'bold 13px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText(Math.max(0, Math.floor(e.timer / 60)) + 'с', sx, sy - 42);
+        } else {
+          ctx.fillStyle = '#ffc832';
+          ctx.beginPath(); ctx.ellipse(sx, sy, 20, 28, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
+          if (e.pet === 2) drawCrown(sx, sy - 33);
+          ctx.fillStyle = '#ffc832';
+          ctx.font = 'bold 11px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('ГОТОВО', sx, sy - 50);
+          if (dist(player.x, player.y, sx, sy) < 100) {
+            ctx.fillStyle = '#ffdc32';
+            ctx.font = 'bold 14px Arial';
+            ctx.fillText('[E]', sx, sy + 48);
+          }
+        }
+      }
+    }
+
+    // Яйца в гнёздах
+    for (var n = 0; n < eggs.length; n++) {
+      var eg = eggs[n];
+      if (eg.loc === 'nest') {
+        ctx.fillStyle = '#643c1e';
+        ctx.beginPath();
+        ctx.ellipse(eg.x, eg.y + 29, 45, 14, 0, 0, Math.PI * 2);
+        ctx.fill();
+        drawEgg(eg.x, eg.y, eg.type, eg.pet);
+      }
+    }
+
+    // Боссы
+    for (var bi = 0; bi < bosses.length; bi++) {
+      drawBoss(bosses[bi]);
+    }
+
+    // Дорожка
+    var tx = tm.x, ty = tm.y;
+    var onT = onTM();
+    ctx.fillStyle = '#6e6e6e';
+    ctx.fillRect(tx - 70, ty - 35, 140, 70);
+    if (onT) {
+      ctx.strokeStyle = '#ffdc32'; ctx.lineWidth = 4;
+      ctx.strokeRect(tx - 80, ty - 45, 160, 90);
+    }
+    ctx.fillStyle = '#c8c8c8';
+    ctx.fillRect(tx - 58, ty - 23, 116, 46);
+    ctx.fillStyle = 'black';
+    ctx.font = 'bold 11px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('Дорожка ур.' + tm.level, tx, ty + 4);
+
+    var maxSp = TM_MAX[tm.level];
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 11px Arial';
+    if (tm.level >= 8) {
+      ctx.fillStyle = '#ffc832';
+      ctx.fillText('МАКС УРОВЕНЬ', tx, ty - 55);
+    } else {
+      ctx.fillText('Макс:' + maxSp + ' | Ур.' + (tm.level + 1) + ' стоит:' + TM_COST[tm.level], tx, ty - 55);
+    }
+
+    if (tm.upgrading) {
+      var prog = (90 - tm.upTimer) / 90;
+      ctx.fillStyle = '#3cc84b';
+      ctx.fillRect(tx - 50, ty + 40, 100 * prog, 10);
+      ctx.fillStyle = '#3cc84b';
+      ctx.font = 'bold 10px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Улучшается...', tx, ty + 62);
+    } else if (onT) {
+      if (player.speed < maxSp) {
+        ctx.fillStyle = '#ffdc32';
+        ctx.font = 'bold 11px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Тренировка: ' + player.speed.toFixed(1) + '/' + maxSp, tx, ty + 48);
+        var prog2 = player.trainTimer / TRAIN_TICK;
+        ctx.fillStyle = '#3cc84b';
+        ctx.fillRect(tx - 50, ty + 55, 100 * prog2, 8);
+      } else {
+        ctx.fillStyle = '#3cc84b';
+        ctx.font = 'bold 11px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Набрал максимум! Жми E', tx, ty + 48);
+      }
+    }
+
+    // Игрок
+    var px = player.x, py = player.y;
+    ctx.fillStyle = '#4285f4';
+    ctx.beginPath(); ctx.arc(px, py, 20, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'white';
+    ctx.beginPath(); ctx.arc(px - 7, py - 5, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(px + 7, py - 5, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'black';
+    ctx.beginPath(); ctx.arc(px - 7, py - 5, 2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(px + 7, py - 5, 2, 0, Math.PI * 2); ctx.fill();
+
+    if (player.carrying !== null) {
+      for (var c = 0; c < eggs.length; c++) {
+        if (eggs[c].type === player.carrying && eggs[c].loc === 'carried') {
+          drawEgg(px, py - 48, eggs[c].type, eggs[c].pet);
+          break;
+        }
+      }
+    }
+
+    ctx.restore();
+    // КОНЕЦ МИРА
+
+    // ===== UI (экранные координаты) =====
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 20px Arial';
+    ctx.fillStyle = '#ffc832';
+    ctx.fillText('Деньги: ' + Math.floor(money), 20, 40);
+    ctx.font = 'bold 15px Arial';
+    ctx.fillStyle = '#3cc84b';
+    ctx.fillText('Доход: ' + totalIncome() + '/сек', 20, 68);
+    ctx.fillStyle = '#4285f4';
+    ctx.fillText('Скорость: ' + player.speed.toFixed(1), 20, 92);
+
+    // Подсказка про дорожку
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 15px Arial';
+    if (onT && !tm.upgrading) {
+      var lvl = tm.level;
+      var hint, color;
+      if (lvl >= 8) { hint = 'МАКС УРОВЕНЬ ДОРОЖКИ'; color = '#ffc832'; }
+      else {
+        var cost = TM_COST[lvl];
+        if (money >= cost) { hint = '[E] Улучшить до ур.' + (lvl + 1) + ' — ' + cost + ' монет'; color = '#3cc84b'; }
+        else { hint = 'Улучшение стоит ' + cost + ' (у тебя ' + Math.floor(money) + ')'; color = '#dc3545'; }
+      }
+      ctx.fillStyle = color;
+      ctx.fillText(hint, W / 2, H - 50);
+    }
+
+    // Подсказка про кражу
+    for (var q = 0; q < eggs.length; q++) {
+      if (eggs[q].loc === 'nest' && player.carrying === null && dist(player.x, player.y, eggs[q].x, eggs[q].y) < 60) {
+        var need = REQ_SPEED[eggs[q].type];
+        var ok = player.speed >= need;
+        ctx.fillStyle = ok ? '#3cc84b' : '#dc3545';
+        ctx.fillText('[E] Украсть (нужно ' + need + ' ' + (ok ? '✓' : '✗') + ')', W / 2, H - 80);
+      }
+    }
+
+    // Сообщение
+    if (msgTimer > 0) {
+      ctx.fillStyle = '#ffdc32';
+      ctx.font = 'bold 18px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(msg, W / 2, 130);
+    }
+
+    // Управление
+    ctx.fillStyle = '#c8c8c8';
+    ctx.font = '11px Arial';
+    ctx.textAlign = 'center';
+    if (isMobile) {
+      ctx.fillText('Джойстик — движение  |  E — действие', W / 2, H - 20);
+    } else {
+      ctx.fillText('WASD — ходить  |  E — действие', W / 2, H - 20);
+    }
+
+    // Индикатор карты внизу
+    var barW = 200, barX = W/2 - barW/2, barY = H - 8;
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.fillRect(barX, barY, barW, 4);
+    ctx.fillStyle = '#ffc832';
+    var ratio = player.x / MAP_W;
+    ctx.fillRect(barX + barW * ratio - 4, barY - 2, 8, 8);
+  }
+
+  // ===== ВВОД =====
+  document.addEventListener('keydown', function(e) {
+    var k = e.key.toLowerCase();
+    keys[k] = true;
+    if (k === 'e') interact();
+    if (k === ' ' || k.indexOf('arrow') === 0) e.preventDefault();
+  });
+  document.addEventListener('keyup', function(e) {
+    keys[e.key.toLowerCase()] = false;
+  });
+
+  var joyEl = document.getElementById('joy');
+  var knobEl = document.getElementById('joy-knob');
+  var btnE = document.getElementById('btn-e');
+
+  if (isMobile) {
+    joyEl.style.display = 'block';
+    btnE.style.display = 'flex';
+  }
+
+  function joyStart(e) {
+    e.preventDefault();
+    joyActive = true;
+    joyMove(e);
+  }
+  function joyMove(e) {
+    if (!joyActive) return;
+    e.preventDefault();
+    var t = (e.touches && e.touches[0]) ? e.touches[0] : e;
+    if (!t) return;
+    var r = joyEl.getBoundingClientRect();
+    var cx = t.clientX - (r.left + r.width / 2);
+    var cy = t.clientY - (r.top + r.height / 2);
+    var maxR = r.width / 2 - 30;
+    var d = Math.hypot(cx, cy);
+    if (d > maxR) { cx = cx / d * maxR; cy = cy / d * maxR; }
+    knobEl.style.transform = 'translate(' + cx + 'px,' + cy + 'px)';
+    joyDX = cx / maxR;
+    joyDY = cy / maxR;
+  }
+  function joyEnd(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    joyActive = false;
+    joyDX = 0;
+    joyDY = 0;
+    knobEl.style.transform = 'translate(0,0)';
+  }
+
+  joyEl.addEventListener('touchstart', joyStart, {passive: false});
+  joyEl.addEventListener('touchmove', joyMove, {passive: false});
+  joyEl.addEventListener('touchend', joyEnd, {passive: false});
+  joyEl.addEventListener('touchcancel', joyEnd, {passive: false});
+  joyEl.addEventListener('mousedown', joyStart);
+  document.addEventListener('mousemove', joyMove);
+  document.addEventListener('mouseup', joyEnd);
+
+  btnE.addEventListener('touchstart', function(e) { e.preventDefault(); interact(); }, {passive: false});
+  btnE.addEventListener('mousedown', function(e) { e.preventDefault(); interact(); });
+
+  document.getElementById('pets-btn').addEventListener('click', function() {
+    var panel = document.getElementById('pets-panel');
+    var list = document.getElementById('pets-list');
+    list.innerHTML = '';
+    if (pets.length === 0) {
+      list.innerHTML = '<div style="text-align:center;color:#888;padding:20px;">У тебя пока нет питомцев</div>';
+    } else {
+      list.innerHTML = '<div style="color:#3cc84b;margin-bottom:10px;">Всего: ' + pets.length + ' | Доход: ' + totalIncome() + '/сек</div>';
+      var counts = {};
+      for (var i = 0; i < pets.length; i++) {
+        var key = pets[i].name + '|' + pets[i].income;
+        counts[key] = (counts[key] || 0) + 1;
+      }
+      for (var k in counts) {
+        var parts = k.split('|');
+        list.innerHTML += '<div class="pet-row"><span>' + parts[0] + '</span><span style="color:#ffc832;">x' + counts[k] + ' +' + parts[1] + '/сек</span></div>';
+      }
+    }
+    panel.style.display = 'block';
+  });
+  document.getElementById('pets-close').addEventListener('click', function() {
+    document.getElementById('pets-panel').style.display = 'none';
+  });
+  document.getElementById('pets-reset').addEventListener('click', function() {
+    if (confirm('Точно сбросить весь прогресс?')) {
+      resetSave();
+    }
+  });
+
+  // Загружаем сохранение при старте
+  loadGame();
+
+  // Сохраняем при уходе со страницы
+  window.addEventListener('beforeunload', function() { saveGame(); });
+  document.addEventListener('visibilitychange', function() {
+    if (document.hidden) saveGame();
+  });
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+  loop();
+})();
+</script>
+</body>
+</html>
